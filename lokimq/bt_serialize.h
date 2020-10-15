@@ -40,6 +40,16 @@
 #include <sstream>
 #include "string_view.h"
 #include "mapbox/variant.hpp"
+#include <string>
+#include <string_view>
+#include "variant.h"
+#include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <tuple>
+#include <algorithm>
 
 
 namespace lokimq {
@@ -410,9 +420,14 @@ struct bt_deserialize<bt_value, void> {
 };
 
 template <typename... Ts>
-struct bt_serialize<mapbox::util::variant<Ts...>> {
-    void operator()(std::ostream& os, const mapbox::util::variant<Ts...>& val) {
-        mapbox::util::apply_visitor(bt_serialize_visitor{os}, val);
+struct bt_serialize<std::variant<Ts...>, std::void_t<bt_serialize<Ts>...>> {
+    void operator()(std::ostream& os, const std::variant<Ts...>& val) {
+        var::visit(
+                [&os] (const auto& val) {
+                    using T = std::remove_cv_t<std::remove_reference_t<decltype(val)>>;
+                    bt_serialize<T>{}(os, val);
+                },
+                val);
     }
 };
 
@@ -543,16 +558,59 @@ inline bt_value bt_get(string_view s) {
 ///     auto v = get_int<uint32_t>(val); // throws if the decoded value doesn't fit in a uint32_t
 template <typename IntType, std::enable_if_t<std::is_integral<IntType>::value, int> = 0>
 IntType get_int(const bt_value &v) {
-    // It's highly unlikely that this code ever runs on a non-2s-complement architecture, but check
-    // at compile time if converting to a uint64_t (because while int64_t -> uint64_t is
-    // well-defined, uint64_t -> int64_t only does the right thing under 2's complement).
-    static_assert(!std::is_unsigned<IntType>::value || sizeof(IntType) != sizeof(int64_t) || -1 == ~0,
-            "Non 2s-complement architecture not supported!");
-    int64_t value = mapbox::util::get<int64_t>(v);
-    if (sizeof(IntType) < sizeof(int64_t)) {
+    if (auto* value = std::get_if<uint64_t>(&v)) {
+        if constexpr (!std::is_same_v<IntType, uint64_t>)
+            if (*value > static_cast<uint64_t>(std::numeric_limits<IntType>::max()))
+                throw std::overflow_error("Unable to extract integer value: stored value is too large for the requested type");
+        return static_cast<IntType>(*value);
+    }
+
+    int64_t value = var::get<int64_t>(v); // throws if no int contained
+    if constexpr (!std::is_same_v<IntType, int64_t>)
         if (value > static_cast<int64_t>(std::numeric_limits<IntType>::max())
                 || value < static_cast<int64_t>(std::numeric_limits<IntType>::min()))
             throw std::overflow_error("Unable to extract integer value: stored value is outside the range of the requested type");
+    return static_cast<IntType>(value);
+}
+
+namespace detail {
+template <typename Tuple, size_t... Is>
+void get_tuple_impl(Tuple& t, const bt_list& l, std::index_sequence<Is...>);
+}
+
+/// Converts a bt_list into the given template std::tuple or std::pair.  Throws a
+/// std::invalid_argument if the list has the wrong size or wrong element types.  Supports recursion
+/// (i.e. if the tuple itself contains tuples or pairs).  The tuple (or nested tuples) may only
+/// contain integral types, strings, string_views, bt_list, bt_dict, and tuples/pairs of those.
+template <typename Tuple>
+Tuple get_tuple(const bt_list& x) {
+    Tuple t;
+    detail::get_tuple_impl(t, x, std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+    return t;
+}
+template <typename Tuple>
+Tuple get_tuple(const bt_value& x) {
+    return get_tuple<Tuple>(var::get<bt_list>(static_cast<const bt_variant&>(x)));
+}
+
+namespace detail {
+template <typename T, typename It>
+void get_tuple_impl_one(T& t, It& it) {
+    const bt_variant& v = *it++;
+    if constexpr (std::is_integral_v<T>) {
+        t = lokimq::get_int<T>(v);
+    } else if constexpr (is_bt_tuple<T>) {
+        if (std::holds_alternative<bt_list>(v))
+            throw std::invalid_argument{"Unable to convert tuple: cannot create sub-tuple from non-bt_list"};
+        t = get_tuple<T>(var::get<bt_list>(v));
+    } else if constexpr (std::is_same_v<std::string, T> || std::is_same_v<std::string_view, T>) {
+        // If we request a string/string_view, we might have the other one and need to copy/view it.
+        if (std::holds_alternative<std::string_view>(v))
+            t = var::get<std::string_view>(v);
+        else
+            t = var::get<std::string>(v);
+    } else {
+        t = var::get<T>(v);
     }
     return static_cast<IntType>(value);
 }

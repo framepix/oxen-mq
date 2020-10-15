@@ -357,7 +357,7 @@ LokiMQ::run_info& LokiMQ::run_info::load(category* cat_, std::string command_, C
 
 LokiMQ::run_info& LokiMQ::run_info::load(pending_command&& pending) {
     return load(&pending.cat, std::move(pending.command), std::move(pending.conn), std::move(pending.access),
-            std::move(pending.remote), std::move(pending.data_parts), pending.callback);
+            std::move(pending.remote), std::move(pending.data_parts), var::get<0>(pending.callback));
 }
 
 LokiMQ::run_info& LokiMQ::run_info::load(batch_job&& bj, bool reply_job) {
