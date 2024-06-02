@@ -143,14 +143,19 @@ target_include_directories(oxenmq
 
 target_compile_options(oxenmq PRIVATE -Wall -Wextra)
 
-option(WARNINGS_AS_ERRORS "treat all warnings as errors" ON)
+option(WARNINGS_AS_ERRORS "treat all warnings as errors" OFF)
 if(WARNINGS_AS_ERRORS)
     target_compile_options(oxenmq PRIVATE -Werror)
 endif()
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
+    message(STATUS "Disabling -Werror for restrict-qualified parameters")
+    target_compile_options(oxenmq PRIVATE -Wno-error=restrict)
+endif()
+
 set_target_properties(oxenmq PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )

@@ -46,7 +46,7 @@ local debian_pipeline(name,
         'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
         'mkdir build',
         'cd build',
-        'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
+        'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + '-DWARNINGS_AS_ERRORS=ON '  + cmake_extra,
         'ninja -v',
         './tests/tests --use-colour yes',
       ] + extra_cmds,
@@ -104,10 +104,12 @@ local full_llvm(version) = debian_pipeline(
       {
         name: 'build',
         commands: [
+          'echo "Building on ${DRONE_STAGE_MACHINE}"',
+          'export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"',
           'mkdir build',
           'cd build',
           'ulimit -n 1024',  // Because macOS has a stupid tiny default ulimit
-          'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
+          'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DWARNINGS_AS_ERRORS=ON ',
           'ninja -v',
           './tests/tests --use-colour yes',
         ],
