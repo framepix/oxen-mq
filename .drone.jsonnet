@@ -12,6 +12,24 @@ local submodules = {
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q ';
 
+
+local generic_build(build_type, cmake_extra, tests=true)
+      = [
+          'mkdir build',
+          'cd build',
+          'cmake .. -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DCMAKE_BUILD_TYPE=' + build_type + ' ' + '-DWARNINGS_AS_ERRORS=ON ' +
+          '-DOXENMQ_BUILD_TESTS=' + (if tests then 'ON ' else 'OFF ') +
+          cmake_extra,
+          'ninja -v',
+          'cd ..',
+        ]
+        + (if tests then [
+             'cd build',
+             './tests/tests --use-colour yes',
+             'cd ..',
+           ] else []);
+
+
 local debian_pipeline(name,
                       image,
                       arch='amd64',
@@ -43,13 +61,10 @@ local debian_pipeline(name,
         'echo deb http://deb.oxen.io ' + distro + ' main >/etc/apt/sources.list.d/oxen.list',
         'eatmydata ' + apt_get_quiet + ' update',
         'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
-        'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
-        'mkdir build',
-        'cd build',
-        'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' -DCMAKE_CXX_COMPILER_LAUNCHER=ccache ' + cmake_extra,
-        'ninja -v',
-        './tests/tests --use-colour yes',
-      ] + extra_cmds,
+        'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps)
+        ] 
+        + generic_build(build_type, cmake_extra) 
+        + extra_cmds,
     },
   ],
 };
@@ -77,41 +92,49 @@ local full_llvm(version) = debian_pipeline(
               ])
 );
 
+local mac_builder(name,
+                  build_type='Release',
+                  arch='amd64',
+                  cmake_extra='-DCMAKE_CXX_COMPILER_LAUNCHER=ccache ',
+                  extra_cmds=[],
+                  tests=true) = {
+  kind: 'pipeline',
+  type: 'exec',
+  name: name,
+  platform: { os: 'darwin', arch: arch },
+  steps: [
+    { name: 'submodules', commands: submodule_commands },
+    {
+      name: 'build',
+      environment: { SSH_KEY: { from_secret: 'SSH_KEY' } },
+      commands: [
+                  'echo "Building on ${DRONE_STAGE_MACHINE}"',
+                  // If you don't do this then the C compiler doesn't have an include path containing
+                  // basic system headers.  WTF apple:
+                  'export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"',
+                  'ulimit -n 1024',  // Because macOS has a stupid tiny default ulimit
+                ]
+                + generic_build(build_type, cmake_extra)
+                + extra_cmds,
+    },
+  ],
+};
 
 [
   debian_pipeline('Debian sid (amd64)', docker_base + 'debian-sid', distro='sid'),
   debian_pipeline('Debian sid/Debug (amd64)', docker_base + 'debian-sid', build_type='Debug', distro='sid'),
   clang(16),
   full_llvm(16),
-  debian_pipeline('Debian buster (amd64)', docker_base + 'debian-buster'),
-  debian_pipeline('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_pipeline('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', distro='sid'),
+  debian_pipeline('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_pipeline('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64'),
-  debian_pipeline('Debian buster (armhf)', docker_base + 'debian-buster/arm32v7', arch='arm64'),
+  debian_pipeline('Debian bullseye (amd64)', docker_base + 'debian-bullseye'),
+  debian_pipeline('Debian bullseye (armhf)', docker_base + 'debian-bullseye/arm32v7', arch='arm64'),
   debian_pipeline('Ubuntu focal (amd64)', docker_base + 'ubuntu-focal'),
-  debian_pipeline('Ubuntu bionic (amd64)',
-                  docker_base + 'ubuntu-bionic',
-                  deps=default_deps_nocxx,
-                  cmake_extra='-DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8'),
-  {
-    kind: 'pipeline',
-    type: 'exec',
-    name: 'macOS (w/macports)',
-    platform: { os: 'darwin', arch: 'amd64' },
-    environment: { CLICOLOR_FORCE: '1' },  // Lets color through ninja (1.9+)
-    steps: [
-      { name: 'submodules', commands: submodule_commands },
-      {
-        name: 'build',
-        commands: [
-          'mkdir build',
-          'cd build',
-          'ulimit -n 1024',  // Because macOS has a stupid tiny default ulimit
-          'cmake .. -G Ninja -DCMAKE_CXX_FLAGS=-fcolor-diagnostics -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER_LAUNCHER=ccache',
-          'ninja -v',
-          './tests/tests --use-colour yes',
-        ],
-      },
-    ],
-  },
+  debian_pipeline('Ubuntu jammy (amd64)', docker_base + 'ubuntu-jammy'),
+  mac_builder('MacOS (amd64) Release', build_type='Release', arch='amd64'),
+  mac_builder('MacOS (amd64) Debug', build_type='Debug', arch='amd64'),
+  mac_builder('MacOS (arm64) Release', build_type='Release', arch='arm64'),
+  mac_builder('MacOS (arm64) Debug', build_type='Debug', arch='arm64')
+
 ]
