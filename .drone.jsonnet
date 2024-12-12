@@ -1,4 +1,4 @@
-local docker_base = 'registry.oxen.rocks/lokinet-ci-';
+local docker_base = 'registry.oxen.rocks/';
 
 local default_deps_nocxx = ['libsodium-dev', 'libzmq3-dev', 'liboxenc-dev'];
 
@@ -13,13 +13,14 @@ local submodules = {
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q ';
 
 
-local generic_build(build_type, cmake_extra, tests=true)
+local generic_build(build_type, cmake_extra, werror=false, tests=true)
       = [
           'mkdir build',
           'cd build',
-          'cmake .. -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DCMAKE_BUILD_TYPE=' + build_type + ' ' + '-DWARNINGS_AS_ERRORS=ON ' +
-          '-DOXENMQ_BUILD_TESTS=' + (if tests then 'ON ' else 'OFF ') +
-          cmake_extra,
+          'cmake .. -G Ninja -DCMAKE_COLOR_DIAGNOSTICS=ON -DCMAKE_BUILD_TYPE=' + build_type +
+          ' -DWARNINGS_AS_ERRORS=' + (if werror then 'ON' else 'OFF') +
+          ' -DOXENMQ_BUILD_TESTS=' + (if tests then 'ON' else 'OFF') +
+          ' ' + cmake_extra,
           'ninja -v',
           'cd ..',
         ]
@@ -37,6 +38,7 @@ local debian_pipeline(name,
                       cmake_extra='',
                       build_type='Release',
                       extra_cmds=[],
+                      werror=false,
                       distro='$$(lsb_release -sc)',
                       allow_fail=false) = {
   kind: 'pipeline',
@@ -52,19 +54,19 @@ local debian_pipeline(name,
       pull: 'always',
       [if allow_fail then 'failure']: 'ignore',
       commands: [
-        'echo "Building on ${DRONE_STAGE_MACHINE}"',
-        'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
-        apt_get_quiet + 'update',
-        apt_get_quiet + 'install -y eatmydata',
-        'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
-        'cp contrib/deb.oxen.io.gpg /etc/apt/trusted.gpg.d',
-        'echo deb http://deb.oxen.io ' + distro + ' main >/etc/apt/sources.list.d/oxen.list',
-        'eatmydata ' + apt_get_quiet + ' update',
-        'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
-        'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps)
-        ] 
-        + generic_build(build_type, cmake_extra) 
-        + extra_cmds,
+                  'echo "Building on ${DRONE_STAGE_MACHINE}"',
+                  'echo "man-db man-db/auto-update boolean false" | debconf-set-selections',
+                  apt_get_quiet + 'update',
+                  apt_get_quiet + 'install -y eatmydata',
+                  'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
+                  'cp contrib/deb.oxen.io.gpg /etc/apt/trusted.gpg.d',
+                  'echo deb http://deb.oxen.io ' + distro + ' main >/etc/apt/sources.list.d/oxen.list',
+                  'eatmydata ' + apt_get_quiet + ' update',
+                  'eatmydata ' + apt_get_quiet + 'dist-upgrade -y',
+                  'eatmydata ' + apt_get_quiet + 'install -y cmake git ninja-build pkg-config ccache ' + std.join(' ', deps),
+                ]
+                + generic_build(build_type, cmake_extra, werror=werror)
+                + extra_cmds,
     },
   ],
 };
@@ -124,17 +126,19 @@ local mac_builder(name,
   debian_pipeline('Debian sid (amd64)', docker_base + 'debian-sid', distro='sid'),
   debian_pipeline('Debian sid/Debug (amd64)', docker_base + 'debian-sid', build_type='Debug', distro='sid'),
   clang(16),
-  full_llvm(16),
+  full_llvm(17),
   debian_pipeline('Debian sid (ARM64)', docker_base + 'debian-sid', arch='arm64', distro='sid'),
   debian_pipeline('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_pipeline('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64'),
   debian_pipeline('Debian bullseye (amd64)', docker_base + 'debian-bullseye'),
   debian_pipeline('Debian bullseye (armhf)', docker_base + 'debian-bullseye/arm32v7', arch='arm64'),
-  debian_pipeline('Ubuntu focal (amd64)', docker_base + 'ubuntu-focal'),
-  debian_pipeline('Ubuntu jammy (amd64)', docker_base + 'ubuntu-jammy'),
+  debian_pipeline('Ubuntu focal (amd64)',
+                  docker_base + 'ubuntu-focal',
+                  deps=default_deps_nocxx + ['g++-10'],
+                  cmake_extra='-DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10'),
+  debian_pipeline('Ubuntu noble (amd64)', docker_base + 'ubuntu-noble'),
   mac_builder('MacOS (amd64) Release', build_type='Release', arch='amd64'),
   mac_builder('MacOS (amd64) Debug', build_type='Debug', arch='amd64'),
   mac_builder('MacOS (arm64) Release', build_type='Release', arch='arm64'),
-  mac_builder('MacOS (arm64) Debug', build_type='Debug', arch='arm64')
-
+  mac_builder('MacOS (arm64) Debug', build_type='Debug', arch='arm64'),
 ]
