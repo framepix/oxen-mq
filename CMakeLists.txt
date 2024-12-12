@@ -17,7 +17,7 @@ cmake_minimum_required(VERSION 3.7)
 set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12 CACHE STRING "macOS deployment target (Apple clang only)")
 
 project(liboxenmq
-    VERSION 1.2.17
+    VERSION 1.2.18
     LANGUAGES CXX C)
 
 include(GNUInstallDirs)
@@ -81,7 +81,7 @@ if(TARGET oxenc::oxenc)
     message(STATUS "using pre-existing oxenc::oxenc target")
 elseif(BUILD_SHARED_LIBS)
     include(FindPkgConfig)
-    pkg_check_modules(oxenc liboxenc IMPORTED_TARGET)
+    pkg_check_modules(oxenc liboxenc>=1.2.0 IMPORTED_TARGET)
 
     if(oxenc_FOUND)
         # Work around cmake bug 22180 (PkgConfig::tgt not set if no flags needed)
@@ -143,14 +143,19 @@ target_include_directories(oxenmq
 
 target_compile_options(oxenmq PRIVATE -Wall -Wextra)
 
-option(WARNINGS_AS_ERRORS "treat all warnings as errors" ON)
+option(WARNINGS_AS_ERRORS "treat all warnings as errors" OFF)
 if(WARNINGS_AS_ERRORS)
     target_compile_options(oxenmq PRIVATE -Werror)
 endif()
 
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13.0.0)
+    message(STATUS "Disabling -Werror for restrict-qualified parameters")
+    target_compile_options(oxenmq PRIVATE -Wno-error=restrict)
+endif()
+
 set_target_properties(oxenmq PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
 )
