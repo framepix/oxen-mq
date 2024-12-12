@@ -1,4 +1,4 @@
-oxenmq (1.2.18-1~ubuntu2404) noble; urgency=medium
+oxenmq (1.2.18-1~ubuntu2410) oracular; urgency=medium
 
   [ Jason Rhinelander ]
   * Update oxen-encoding to latest dev
