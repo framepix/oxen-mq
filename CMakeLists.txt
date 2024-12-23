@@ -32,6 +32,8 @@ add_library(lokimq
 )
 set_target_properties(lokimq PROPERTIES SOVERSION ${LOKIMQ_LIBVERSION})
 
+target_compile_features(lokimq PUBLIC cxx_std_17)
+
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(lokimq PRIVATE Threads::Threads)
@@ -82,7 +84,7 @@ target_include_directories(lokimq
 
 target_compile_options(lokimq PRIVATE -Wall -Wextra -Werror)
 set_target_properties(lokimq PROPERTIES
-    CXX_STANDARD 14
+    CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
